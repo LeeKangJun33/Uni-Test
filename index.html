@@ -361,6 +361,15 @@ const sunLabel = (() => {
   const obj = new CSS2DObject(d); obj.position.set(0,8,0); sunGroup.add(obj); return obj;
 })();
 
+// 태양 클릭 히트 구체
+const sunHit=new THREE.Mesh(new THREE.SphereGeometry(9,8,8),new THREE.MeshBasicMaterial({visible:false,depthWrite:false}));
+sunHit.userData={
+  name:'태양', eng:'Sun',
+  desc:'태양계의 중심별. 수소 핵융합 반응으로 에너지를 생성하며, 태양계 전체 질량의 99.86%를 차지합니다. 지구에서 약 1억 5천만 km 떨어져 있습니다.',
+  stats:[['지름','1,392,700 km'],['표면온도','5,500°C'],['핵심온도','1,500만°C'],['나이','약 46억 년']]
+};
+sunGroup.add(sunHit);
+
 const sunLight = new THREE.PointLight(0xffddaa, 2200, 1400);
 scene.add(sunLight);
 scene.add(new THREE.AmbientLight(0x111133, 1.0));
@@ -593,6 +602,15 @@ accDisk.rotation.x=Math.PI/2.4; bhGroup.add(accDisk);
 const bhDiv=document.createElement('div'); bhDiv.className='planet-label'; bhDiv.textContent='BLACK HOLE';
 const bhLbl=new CSS2DObject(bhDiv); bhLbl.position.set(0,13,0); bhGroup.add(bhLbl);
 
+// 블랙홀 클릭 히트 구체
+const bhHit=new THREE.Mesh(new THREE.SphereGeometry(14,8,8),new THREE.MeshBasicMaterial({visible:false,depthWrite:false}));
+bhHit.userData={
+  name:'블랙홀', eng:'Black Hole',
+  desc:'중력이 너무 강해 빛조차 탈출할 수 없는 천체. 주변의 강착 원반에서 수백만 도의 가스가 소용돌이치며 X선을 방출합니다.',
+  stats:[['유형','항성 질량 블랙홀'],['사건 지평선','~27 km'],['강착 원반 온도','수백만°C'],['탈출 속도','광속 초과']]
+};
+bhGroup.add(bhHit);
+
 // ═══════════════════════════════════════════════════════
 //  WORMHOLE
 // ═══════════════════════════════════════════════════════
@@ -719,12 +737,17 @@ function doPick(clientX, clientY){
   mouse2.x=(clientX/innerWidth)*2-1;
   mouse2.y=-(clientY/innerHeight)*2+1;
   ray.setFromCamera(mouse2,camera);
-  const hits=ray.intersectObjects(hitMeshes);
+
+  // 행성 + 태양 + 블랙홀 모두 검사
+  const allHits=[...hitMeshes, sunHit, bhHit];
+  const hits=ray.intersectObjects(allHits);
   if(hits.length){
     const m=hits[0].object;
     showInfo(m);
-    flyTo(m.position.clone(), m.userData.r*6.5);
-    try{ showDistLines(m); }catch(e){ console.warn('distLines:',e); }
+    const flyDist = m.userData.r ? m.userData.r*6.5 : 30;
+    const flyPos = m.getWorldPosition ? m.getWorldPosition(new THREE.Vector3()) : m.position.clone();
+    flyTo(flyPos, flyDist);
+    if(m.userData.r) try{ showDistLines(m); }catch(e){}
   }
 }
 renderer.domElement.addEventListener('click',e=>doPick(e.clientX,e.clientY));
