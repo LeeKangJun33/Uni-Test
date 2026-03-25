@@ -73,9 +73,65 @@
 
     #label-renderer { position: fixed; top: 0; left: 0; pointer-events: none; z-index: 5; }
 
+    /* 조이스틱 */
+    #joystick-wrap {
+      display: none;
+      position: fixed; bottom: 28px; right: 28px;
+      width: 100px; height: 100px; z-index: 30;
+    }
+    #joystick-base {
+      width: 100px; height: 100px; border-radius: 50%;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.18);
+      position: relative; backdrop-filter: blur(8px);
+    }
+    #joystick-knob {
+      width: 38px; height: 38px; border-radius: 50%;
+      background: rgba(100,160,255,0.5);
+      border: 1px solid rgba(120,180,255,0.7);
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%,-50%);
+      pointer-events: none;
+    }
+
     @keyframes slideIn {
       from { opacity: 0; transform: translateY(-50%) translateX(14px); }
       to   { opacity: 1; transform: translateY(-50%) translateX(0); }
+    }
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(30px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── 모바일 ── */
+    @media (max-width: 600px) {
+      #title h1 { font-size: 1.2rem; letter-spacing: 8px; }
+      #title p  { font-size: 0.5rem; letter-spacing: 3px; }
+
+      #audio-btn { font-size: 0.62rem; padding: 8px 12px; top: 16px; left: 12px; }
+      #tour-tag  { top: 16px; right: 12px; font-size: 0.55rem; }
+
+      /* 정보 패널 → 하단 슬라이드업 */
+      #info-panel {
+        top: auto; right: 0; bottom: 0; left: 0;
+        transform: none;
+        width: 100%; border-radius: 16px 16px 0 0;
+        max-height: 55vh; overflow-y: auto;
+        padding: 20px 20px 30px;
+      }
+      #info-panel.visible { animation: slideUp 0.3s ease; }
+      #info-panel h2 { font-size: 1.3rem; letter-spacing: 3px; }
+
+      /* HUD 버튼 → 하단 가로 배치 */
+      #hud {
+        bottom: 16px; left: 50%; transform: translateX(-50%);
+        flex-direction: row; gap: 8px; width: calc(100% - 32px);
+        justify-content: center;
+      }
+      .hud-btn { padding: 10px 14px; font-size: 0.6rem; letter-spacing: 1px; flex: 1; text-align: center; }
+
+      #wasd-hint { display: none !important; }
+      #joystick-wrap { display: block; }
     }
   </style>
 </head>
@@ -100,6 +156,10 @@
 
 <div id="tour-tag">● AUTO TOUR</div>
 <div id="wasd-hint">W/S · 전진 / 후진<br>A/D · 좌 / 우<br>Q/E · 상 / 하<br>ESC · 종료</div>
+
+<div id="joystick-wrap">
+  <div id="joystick-base"><div id="joystick-knob"></div></div>
+</div>
 
 <script type="importmap">
 {
@@ -603,18 +663,24 @@ function showInfo(mesh){
   document.getElementById('info-panel').classList.add('visible');
 }
 
-renderer.domElement.addEventListener('click',e=>{
+function doPick(clientX, clientY){
   if(shipMode) return;
-  mouse2.x=(e.clientX/innerWidth)*2-1;
-  mouse2.y=-(e.clientY/innerHeight)*2+1;
+  mouse2.x=(clientX/innerWidth)*2-1;
+  mouse2.y=-(clientY/innerHeight)*2+1;
   ray.setFromCamera(mouse2,camera);
   const hits=ray.intersectObjects(planetMeshes);
-  if(hits.length){
-    const m=hits[0].object;
-    showInfo(m);
-    flyTo(m.position.clone(), m.userData.r*6.5);
-  }
-});
+  if(hits.length){ showInfo(hits[0].object); flyTo(hits[0].object.position.clone(), hits[0].object.userData.r*6.5); }
+}
+renderer.domElement.addEventListener('click',e=>doPick(e.clientX,e.clientY));
+
+// 터치 탭 (짧게 터치한 경우만 pick)
+let touchStartX=0, touchStartY=0, touchStartT=0;
+renderer.domElement.addEventListener('touchstart',e=>{ touchStartX=e.touches[0].clientX; touchStartY=e.touches[0].clientY; touchStartT=Date.now(); },{passive:true});
+renderer.domElement.addEventListener('touchend',e=>{
+  const dx=e.changedTouches[0].clientX-touchStartX, dy=e.changedTouches[0].clientY-touchStartY;
+  const dt=Date.now()-touchStartT;
+  if(Math.sqrt(dx*dx+dy*dy)<12 && dt<250) doPick(touchStartX,touchStartY);
+},{passive:true});
 document.getElementById('info-close').addEventListener('click',()=>document.getElementById('info-panel').classList.remove('visible'));
 
 // ═══════════════════════════════════════════════════════
@@ -640,15 +706,41 @@ renderer.domElement.addEventListener('mousemove',e=>{
   lmx=e.clientX; lmy=e.clientY;
 });
 
+// 조이스틱
+const joyKnob = document.getElementById('joystick-knob');
+const joyBase = document.getElementById('joystick-base');
+let joyVec = {x:0, y:0}, joyActive = false, joyId = null;
+const JOY_R = 31; // max knob displacement
+
+joyBase.addEventListener('touchstart', e=>{
+  e.preventDefault(); joyActive=true; joyId=e.touches[0].identifier;
+},{passive:false});
+joyBase.addEventListener('touchmove', e=>{
+  e.preventDefault();
+  for(const t of e.touches){
+    if(t.identifier!==joyId) continue;
+    const rect=joyBase.getBoundingClientRect();
+    let dx=t.clientX-(rect.left+rect.width/2), dy=t.clientY-(rect.top+rect.height/2);
+    const len=Math.sqrt(dx*dx+dy*dy);
+    if(len>JOY_R){dx=dx/len*JOY_R; dy=dy/len*JOY_R;}
+    joyVec={x:dx/JOY_R, y:dy/JOY_R};
+    joyKnob.style.transform=`translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+  }
+},{passive:false});
+['touchend','touchcancel'].forEach(ev=>joyBase.addEventListener(ev,()=>{
+  joyActive=false; joyVec={x:0,y:0};
+  joyKnob.style.transform='translate(-50%,-50%)';
+}));
+
 function tickShip(){
   if(!shipMode) return;
   const spd=1.4;
   const fwd=new THREE.Vector3(); camera.getWorldDirection(fwd);
   const right=new THREE.Vector3().crossVectors(fwd,camera.up).normalize();
-  if(keys['w']) camera.position.addScaledVector(fwd,spd);
-  if(keys['s']) camera.position.addScaledVector(fwd,-spd);
-  if(keys['a']) camera.position.addScaledVector(right,-spd);
-  if(keys['d']) camera.position.addScaledVector(right,spd);
+  if(keys['w']||joyVec.y<-0.2) camera.position.addScaledVector(fwd,spd);
+  if(keys['s']||joyVec.y> 0.2) camera.position.addScaledVector(fwd,-spd);
+  if(keys['a']||joyVec.x<-0.2) camera.position.addScaledVector(right,-spd);
+  if(keys['d']||joyVec.x> 0.2) camera.position.addScaledVector(right,spd);
   if(keys['q']) camera.position.y+=spd;
   if(keys['e']) camera.position.y-=spd;
 }
