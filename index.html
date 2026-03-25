@@ -73,6 +73,34 @@
 
     #label-renderer { position: fixed; top: 0; left: 0; pointer-events: none; z-index: 5; }
 
+    /* 거리 라벨 */
+    .dist-label {
+      color: #88aaff; font-size: 9px; letter-spacing: 1px;
+      background: rgba(0,8,25,0.65); border: 1px solid rgba(80,120,255,0.2);
+      border-radius: 2px; padding: 2px 5px; pointer-events: none; white-space: nowrap;
+    }
+
+    /* 행성 비교 패널 */
+    #compare-panel {
+      position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%);
+      background: rgba(0,4,18,0.92); border: 1px solid rgba(80,130,255,0.25);
+      border-radius: 12px; padding: 20px 26px 22px; z-index: 25; display: none;
+      backdrop-filter: blur(14px); min-width: 340px; text-align: center;
+    }
+    #compare-panel.visible { display: block; animation: slideUp 0.3s ease; }
+    #compare-panel h3 { color: #99bbff; font-weight: 200; letter-spacing: 4px; font-size: 0.85rem; margin-bottom: 14px; text-transform: uppercase; }
+    .compare-selects { display: flex; gap: 12px; justify-content: center; align-items: center; }
+    .compare-selects span { color: #ffffff33; font-size: 0.8rem; }
+    #compare-panel select { background: rgba(20,30,60,0.9); border: 1px solid rgba(80,130,255,0.3); color: #aaccff; border-radius: 5px; padding: 6px 10px; font-size: 0.72rem; cursor: pointer; }
+    #compare-panel option { background: #050d28; }
+    .compare-vis { display: flex; align-items: flex-end; justify-content: center; gap: 30px; margin-top: 18px; min-height: 90px; }
+    .compare-planet { display: flex; flex-direction: column; align-items: center; gap: 7px; }
+    .compare-circle { border-radius: 50%; display: block; }
+    .compare-name { font-size: 0.65rem; letter-spacing: 2px; color: #aaccff; text-transform: uppercase; }
+    .compare-size { font-size: 0.58rem; color: #ffffff33; }
+    #compare-close { position: absolute; top: 10px; right: 12px; background: none; border: none; color: #ffffff33; cursor: pointer; font-size: 0.9rem; }
+    #compare-close:hover { color: #fff; }
+
     /* 조이스틱 */
     #joystick-wrap {
       display: none;
@@ -152,6 +180,18 @@
   <button class="hud-btn" id="btn-tour">⟳ 자동 투어</button>
   <button class="hud-btn" id="btn-ship">✦ 우주선 모드</button>
   <button class="hud-btn" id="btn-reset">⌂ 초기화</button>
+  <button class="hud-btn" id="btn-compare">⊞ 크기 비교</button>
+</div>
+
+<div id="compare-panel">
+  <button id="compare-close">✕</button>
+  <h3>행성 크기 비교</h3>
+  <div class="compare-selects">
+    <select id="cmp-a"></select>
+    <span>vs</span>
+    <select id="cmp-b"></select>
+  </div>
+  <div class="compare-vis" id="compare-vis"></div>
 </div>
 
 <div id="tour-tag">● AUTO TOUR</div>
@@ -669,7 +709,7 @@ function doPick(clientX, clientY){
   mouse2.y=-(clientY/innerHeight)*2+1;
   ray.setFromCamera(mouse2,camera);
   const hits=ray.intersectObjects(planetMeshes);
-  if(hits.length){ showInfo(hits[0].object); flyTo(hits[0].object.position.clone(), hits[0].object.userData.r*6.5); }
+  if(hits.length){ showInfo(hits[0].object); showDistLines(hits[0].object); flyTo(hits[0].object.position.clone(), hits[0].object.userData.r*6.5); }
 }
 renderer.domElement.addEventListener('click',e=>doPick(e.clientX,e.clientY));
 
@@ -765,7 +805,7 @@ document.getElementById('btn-tour').addEventListener('click',()=>{
   document.getElementById('btn-tour').classList.toggle('active',tourMode);
   document.getElementById('tour-tag').classList.toggle('on',tourMode);
   if(tourMode){ tourIdx=0; tourWait=0; nextTour(); }
-  else { document.getElementById('info-panel').classList.remove('visible'); }
+  else { document.getElementById('info-panel').classList.remove('visible'); clearDistLines(); selPlanet=null; }
 });
 
 function tickTour(){
@@ -782,7 +822,262 @@ document.getElementById('btn-reset').addEventListener('click',()=>{
   document.getElementById('btn-tour').classList.remove('active');
   document.getElementById('tour-tag').classList.remove('on');
   document.getElementById('info-panel').classList.remove('visible');
+  clearDistLines(); selPlanet=null;
   camAnim={s:camera.position.clone(),e:new THREE.Vector3(0,80,220),tgt:new THREE.Vector3(0,0,0),t:0,dur:110};
+});
+
+// ═══════════════════════════════════════════════════════
+//  1. 행성 간 거리 표시
+// ═══════════════════════════════════════════════════════
+const distLines=[], distLbls=[];
+let selPlanet=null;
+
+function clearDistLines(){
+  distLines.forEach(l=>scene.remove(l));
+  distLbls.forEach(l=>scene.remove(l));
+  distLines.length=0; distLbls.length=0;
+}
+
+function showDistLines(from){
+  clearDistLines(); selPlanet=from;
+  planetMeshes.forEach(m=>{
+    if(m===from) return;
+    // Line
+    const pts=[from.position.clone(), m.position.clone()];
+    const geo=new THREE.BufferGeometry().setFromPoints(pts);
+    const line=new THREE.Line(geo, new THREE.LineBasicMaterial({color:0x4488ff,transparent:true,opacity:0.45}));
+    scene.add(line); distLines.push({line,geo,target:m});
+    // Label at midpoint
+    const au=(from.position.distanceTo(m.position)/34).toFixed(2);
+    const div=document.createElement('div'); div.className='dist-label';
+    div.textContent=`${m.userData.name} ${au} AU`;
+    const lbl=new CSS2DObject(div);
+    lbl.position.copy(from.position.clone().lerp(m.position,0.52));
+    scene.add(lbl); distLbls.push({lbl,target:m});
+  });
+}
+
+function updateDistLines(){
+  if(!selPlanet) return;
+  distLines.forEach(({line,geo,target})=>{
+    const p=geo.attributes.position;
+    p.setXYZ(0,selPlanet.position.x,selPlanet.position.y,selPlanet.position.z);
+    p.setXYZ(1,target.position.x,target.position.y,target.position.z);
+    p.needsUpdate=true;
+  });
+  distLbls.forEach(({lbl,target})=>{
+    lbl.position.copy(selPlanet.position.clone().lerp(target.position,0.52));
+    const au=(selPlanet.position.distanceTo(target.position)/34).toFixed(2);
+    lbl.element.textContent=`${target.userData.name} ${au} AU`;
+  });
+}
+
+// showInfo에 거리선 연동
+const _origShowInfo=showInfo;
+window._showInfoWithDist=function(mesh){
+  _origShowInfo(mesh);
+  showDistLines(mesh);
+};
+
+// ═══════════════════════════════════════════════════════
+//  2. 혜성 (타원 궤도)
+// ═══════════════════════════════════════════════════════
+const COMET_A=105, COMET_E=0.87;
+const COMET_B=COMET_A*Math.sqrt(1-COMET_E*COMET_E);
+const COMET_C=COMET_A*COMET_E;
+
+function cometPos(theta){
+  // Sun at focus: shift x by -c so sun is at origin
+  return new THREE.Vector3(
+    COMET_A*Math.cos(theta)-COMET_C,
+    Math.sin(theta)*3,
+    COMET_B*Math.sin(theta)
+  );
+}
+
+const cometGroup=new THREE.Group(); scene.add(cometGroup);
+
+// Head
+const cometHead=new THREE.Mesh(
+  new THREE.SphereGeometry(0.6,16,16),
+  new THREE.MeshBasicMaterial({color:0xaaddff})
+);
+cometGroup.add(cometHead);
+
+// Glow sprite
+{
+  const cv=document.createElement('canvas'); cv.width=cv.height=64;
+  const ctx=cv.getContext('2d');
+  const g=ctx.createRadialGradient(32,32,0,32,32,32);
+  g.addColorStop(0,'#aaeeffff'); g.addColorStop(0.3,'#6699ff88'); g.addColorStop(1,'#00000000');
+  ctx.fillStyle=g; ctx.fillRect(0,0,64,64);
+  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(cv),transparent:true,blending:THREE.AdditiveBlending,depthWrite:false}));
+  sp.scale.setScalar(4); cometGroup.add(sp);
+}
+
+// Tail (trail of points)
+const TAIL_LEN=60;
+const tailPos=new Float32Array(TAIL_LEN*3);
+const tailGeo=new THREE.BufferGeometry();
+tailGeo.setAttribute('position',new THREE.BufferAttribute(tailPos,3));
+const tailLine=new THREE.Line(tailGeo,new THREE.LineBasicMaterial({color:0x88ccff,transparent:true,opacity:0.6,vertexColors:false}));
+scene.add(tailLine);
+const tailHistory=[];
+let cometAngle=0;
+
+function tickComet(){
+  // Speed varies by distance (Kepler: faster near sun)
+  const r=cometPos(cometAngle).length();
+  const spd=0.004*(1+(COMET_A/r)*0.8);
+  cometAngle=(cometAngle+spd)%(Math.PI*2);
+  const pos=cometPos(cometAngle);
+  cometGroup.position.copy(pos);
+
+  tailHistory.unshift(pos.clone());
+  if(tailHistory.length>TAIL_LEN) tailHistory.pop();
+  const attr=tailLine.geometry.attributes.position;
+  tailHistory.forEach((p,i)=>{attr.setXYZ(i,p.x,p.y,p.z);});
+  // Fill remaining slots with last point
+  for(let i=tailHistory.length;i<TAIL_LEN;i++) attr.setXYZ(i,pos.x,pos.y,pos.z);
+  attr.needsUpdate=true;
+}
+
+// Comet label
+{
+  const div=document.createElement('div'); div.className='planet-label'; div.textContent='HALLEY';
+  const lbl=new CSS2DObject(div); lbl.position.set(0,1.2,0); cometGroup.add(lbl);
+}
+
+// ═══════════════════════════════════════════════════════
+//  3. 우주정거장 (ISS)
+// ═══════════════════════════════════════════════════════
+const issGroup=new THREE.Group(); scene.add(issGroup);
+const issMat=new THREE.MeshStandardMaterial({color:0xccddff,metalness:0.7,roughness:0.3});
+const issDark=new THREE.MeshStandardMaterial({color:0x334455,metalness:0.5,roughness:0.4});
+
+// 본체
+issGroup.add(new THREE.Mesh(new THREE.BoxGeometry(2.2,0.4,0.4),issMat));
+// 트러스 (가로 빔)
+const truss=new THREE.Mesh(new THREE.BoxGeometry(5,0.15,0.15),issMat); issGroup.add(truss);
+// 태양광 패널 4쌍
+[[-1.8,0,0.9],[-1.8,0,-0.9],[1.8,0,0.9],[1.8,0,-0.9]].forEach(([x,y,z])=>{
+  const panel=new THREE.Mesh(new THREE.BoxGeometry(1.2,0.05,0.6),new THREE.MeshStandardMaterial({color:0x2244aa,metalness:0.3,roughness:0.5}));
+  panel.position.set(x,y,z); issGroup.add(panel);
+});
+// 방사체 패널
+[[-1,0,0],[ 1,0,0]].forEach(([x,y,z])=>{
+  const rad=new THREE.Mesh(new THREE.BoxGeometry(0.4,0.05,0.8),issDark);
+  rad.position.set(x,0.25,z); issGroup.add(rad);
+});
+
+issGroup.scale.setScalar(0.18);
+
+let issAngle=0;
+function tickISS(){
+  const earth=planetMeshes[2]; // 지구
+  issAngle+=0.012;
+  const r=earth.userData.r*2.5;
+  issGroup.position.set(
+    earth.position.x+Math.cos(issAngle)*r,
+    earth.position.y+Math.sin(issAngle*0.3)*r*0.4,
+    earth.position.z+Math.sin(issAngle)*r
+  );
+  issGroup.rotation.y=issAngle+Math.PI/2;
+}
+
+// ISS label
+{
+  const div=document.createElement('div'); div.className='planet-label'; div.textContent='ISS';
+  const lbl=new CSS2DObject(div); lbl.position.set(0,0.5,0); issGroup.add(lbl);
+}
+
+// ═══════════════════════════════════════════════════════
+//  4. 별자리 선 (오리온, 북두칠성)
+// ═══════════════════════════════════════════════════════
+function makeConstellation(stars, connections, offset, color=0x4466aa){
+  const D=850;
+  const pts=stars.map(([x,y])=>new THREE.Vector3((x+offset[0])*D*0.06, (y+offset[1])*D*0.06, -D));
+  // Star dots
+  const geo=new THREE.BufferGeometry().setFromPoints(pts);
+  scene.add(new THREE.Points(geo,new THREE.PointsMaterial({color:0xffffff,size:1.8})));
+  // Lines
+  connections.forEach(([a,b])=>{
+    const lg=new THREE.BufferGeometry().setFromPoints([pts[a],pts[b]]);
+    scene.add(new THREE.Line(lg,new THREE.LineBasicMaterial({color,transparent:true,opacity:0.25})));
+  });
+  // Label
+  const c=pts.reduce((a,p)=>a.add(p),new THREE.Vector3()).divideScalar(pts.length);
+  const div=document.createElement('div'); div.className='planet-label';
+  div.style.fontSize='8px'; div.style.opacity='0.5';
+  div.textContent=offset[2];
+  const lbl=new CSS2DObject(div); lbl.position.copy(c.clone().add(new THREE.Vector3(0,18,0)));
+  scene.add(lbl);
+}
+
+// 오리온 (Orion)
+makeConstellation(
+  [[0,4],[2,3],[1,0],[1,-0.8],[1,-1.5],[0,-4],[2.5,-3.5]],
+  [[0,1],[0,2],[1,3],[2,3],[3,4],[4,5],[4,6]],
+  [-6,2,'ORION'], 0x5577cc
+);
+// 북두칠성 (Big Dipper)
+makeConstellation(
+  [[0,0],[1.2,0.3],[2.2,0],[3,0.5],[3.8,0],[3.5,-1],[2.8,-1.5]],
+  [[0,1],[1,2],[2,3],[3,4],[4,5],[5,6]],
+  [5,3,'BIG DIPPER'], 0x7755aa
+);
+// 카시오페이아 (Cassiopeia)
+makeConstellation(
+  [[-2,0],[-.8,1.2],[0.5,0],[1.8,1.2],[3,0]],
+  [[0,1],[1,2],[2,3],[3,4]],
+  [1,-4,'CASSIOPEIA'], 0x4488aa
+);
+
+// ═══════════════════════════════════════════════════════
+//  5. 행성 비교 모드
+// ═══════════════════════════════════════════════════════
+const sunData={name:'태양',eng:'Sun',r:6,color:'#ffcc33'};
+const allBodies=[sunData,...PLANETS];
+const cmpA=document.getElementById('cmp-a');
+const cmpB=document.getElementById('cmp-b');
+
+allBodies.forEach((p,i)=>{
+  [cmpA,cmpB].forEach(sel=>{
+    const opt=document.createElement('option'); opt.value=i; opt.textContent=p.name; sel.appendChild(opt);
+  });
+});
+cmpA.value='3'; // 지구
+cmpB.value='5'; // 토성
+
+function updateCompare(){
+  const a=allBodies[+cmpA.value], b=allBodies[+cmpB.value];
+  const maxR=Math.max(a.r,b.r);
+  const BASE=70;
+  function circle(p){
+    const sz=Math.max(8,Math.round((p.r/maxR)*BASE));
+    const col=p.color||(p.color==='#'?p.color:`#${new THREE.Color(p.color).getHexString()}`);
+    const hexCol=typeof p.color==='number'?`#${new THREE.Color(p.color).getHexString()}`:p.color;
+    return `<div class="compare-planet">
+      <div class="compare-circle" style="width:${sz}px;height:${sz}px;background:radial-gradient(circle at 35% 35%,${hexCol}ff,${hexCol}44)"></div>
+      <div class="compare-name">${p.name}</div>
+      <div class="compare-size">지름 ${p.r===6?'1,392,700 km':(p.r*2120)|0+' km'}</div>
+    </div>`;
+  }
+  document.getElementById('compare-vis').innerHTML=circle(a)+circle(b);
+}
+
+cmpA.addEventListener('change',updateCompare);
+cmpB.addEventListener('change',updateCompare);
+
+document.getElementById('btn-compare').addEventListener('click',()=>{
+  const panel=document.getElementById('compare-panel');
+  const on=panel.classList.toggle('visible');
+  document.getElementById('btn-compare').classList.toggle('active',on);
+  if(on) updateCompare();
+});
+document.getElementById('compare-close').addEventListener('click',()=>{
+  document.getElementById('compare-panel').classList.remove('visible');
+  document.getElementById('btn-compare').classList.remove('active');
 });
 
 // ═══════════════════════════════════════════════════════
@@ -853,6 +1148,15 @@ function animate(){
   whPlane.lookAt(camera.position);
   whRing.rotation.z=t*0.9;
   whGroup.rotation.y=t*0.025;
+
+  // 혜성
+  tickComet();
+
+  // ISS
+  tickISS();
+
+  // 거리선 업데이트
+  updateDistLines();
 
   // Shooting stars
   tickShooters();
