@@ -709,7 +709,12 @@ function doPick(clientX, clientY){
   mouse2.y=-(clientY/innerHeight)*2+1;
   ray.setFromCamera(mouse2,camera);
   const hits=ray.intersectObjects(planetMeshes);
-  if(hits.length){ showInfo(hits[0].object); showDistLines(hits[0].object); flyTo(hits[0].object.position.clone(), hits[0].object.userData.r*6.5); }
+  if(hits.length){
+    const m=hits[0].object;
+    showInfo(m);
+    flyTo(m.position.clone(), m.userData.r*6.5);
+    try{ showDistLines(m); }catch(e){ console.warn('distLines:',e); }
+  }
 }
 renderer.domElement.addEventListener('click',e=>doPick(e.clientX,e.clientY));
 
@@ -833,8 +838,8 @@ const distLines=[], distLbls=[];
 let selPlanet=null;
 
 function clearDistLines(){
-  distLines.forEach(l=>scene.remove(l));
-  distLbls.forEach(l=>scene.remove(l));
+  distLines.forEach(({line})=>scene.remove(line));
+  distLbls.forEach(({lbl})=>scene.remove(lbl));
   distLines.length=0; distLbls.length=0;
 }
 
@@ -858,26 +863,24 @@ function showDistLines(from){
 }
 
 function updateDistLines(){
-  if(!selPlanet) return;
-  distLines.forEach(({line,geo,target})=>{
-    const p=geo.attributes.position;
-    p.setXYZ(0,selPlanet.position.x,selPlanet.position.y,selPlanet.position.z);
-    p.setXYZ(1,target.position.x,target.position.y,target.position.z);
-    p.needsUpdate=true;
-  });
-  distLbls.forEach(({lbl,target})=>{
-    lbl.position.copy(selPlanet.position.clone().lerp(target.position,0.52));
-    const au=(selPlanet.position.distanceTo(target.position)/34).toFixed(2);
-    lbl.element.textContent=`${target.userData.name} ${au} AU`;
-  });
+  if(!selPlanet||!distLines.length) return;
+  try{
+    distLines.forEach(({line,geo,target})=>{
+      if(!target.position) return;
+      const p=geo.attributes.position;
+      p.setXYZ(0,selPlanet.position.x,selPlanet.position.y,selPlanet.position.z);
+      p.setXYZ(1,target.position.x,target.position.y,target.position.z);
+      p.needsUpdate=true;
+    });
+    distLbls.forEach(({lbl,target})=>{
+      if(!target.position) return;
+      lbl.position.copy(selPlanet.position.clone().lerp(target.position,0.52));
+      const au=(selPlanet.position.distanceTo(target.position)/34).toFixed(2);
+      lbl.element.textContent=`${target.userData.name} ${au} AU`;
+    });
+  }catch(e){ selPlanet=null; }
 }
 
-// showInfo에 거리선 연동
-const _origShowInfo=showInfo;
-window._showInfoWithDist=function(mesh){
-  _origShowInfo(mesh);
-  showDistLines(mesh);
-};
 
 // ═══════════════════════════════════════════════════════
 //  2. 혜성 (타원 궤도)
